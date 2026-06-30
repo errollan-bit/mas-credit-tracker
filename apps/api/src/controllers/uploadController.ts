@@ -122,10 +122,9 @@ export const uploadCollectionsFeed = async (req: Request, res: Response): Promis
     });
 };
 
-// 4. LIVE RISK LEDGER ANALYTICS (NEW ENGINE!)
+// 4. LIVE RISK LEDGER ANALYTICS (UPDATED COUNTERING ENGINE!)
 export const getCreditLedger = async (req: Request, res: Response): Promise<void> => {
   try {
-    // Fetch everything dynamically structured through relationships
     const groups = await prisma.group.findMany({
       include: {
         stores: {
@@ -141,21 +140,22 @@ export const getCreditLedger = async (req: Request, res: Response): Promise<void
       let hasOverdueInvoices = false;
       const now = new Date();
 
-      // Look through every single order tied to every store in this group
       group.stores.forEach((store) => {
         store.orders.forEach((order) => {
           if (order.paymentStatus !== 'Fully Paid') {
             const amount = Number(order.orderAmount);
             totalOutstanding += amount;
 
-            // Calculate exact aging configuration
-            const orderDate = new Date(order.orderDate);
-            const ageInMs = now.getTime() - orderDate.getTime();
-            const ageInDays = Math.floor(ageInMs / (1000 * 60 * 60 * 24));
+            // NEW LOGIC: Only start the clock IF the invoice has a Countering Date
+            if (order.counteringDate) {
+              const counterDate = new Date(order.counteringDate);
+              const ageInMs = now.getTime() - counterDate.getTime();
+              const ageInDays = Math.floor(ageInMs / (1000 * 60 * 60 * 24));
 
-            // CRITICAL CHECK: Hard Block Rule for delinquency
-            if (ageInDays > group.paymentTerms) {
-              hasOverdueInvoices = true;
+              // CRITICAL CHECK: Hard Block Rule based on Countering Date
+              if (ageInDays > group.paymentTerms) {
+                hasOverdueInvoices = true;
+              }
             }
           }
         });
@@ -164,12 +164,11 @@ export const getCreditLedger = async (req: Request, res: Response): Promise<void
       const approvedLimit = Number(group.approvedLimit);
       const availableCredit = approvedLimit - totalOutstanding;
 
-      // Determine clean status rule based on calculation outputs
       let status = 'Active';
       if (hasOverdueInvoices) {
         status = 'Blocked';
       } else if (availableCredit <= approvedLimit * 0.1) {
-        status = 'Limit Review'; // Flags if available credit drops below 10%
+        status = 'Limit Review';
       }
 
       return {

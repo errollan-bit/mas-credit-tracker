@@ -1,13 +1,39 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// TABLE A: Group Level Credit Masterfile
+model Group {
+  id            String   @id
+  name          String
+  approvedLimit Decimal  @db.Decimal(10, 2)
+  paymentTerms  Int
+  stores        Store[]
+}
+
+// TABLE A: Store Level Mapping
+model Store {
+  id        String  @id
+  name      String
+  groupId   String
+  group     Group   @relation(fields: [groupId], references: [id])
+  orders    Order[]
+}
+
+// TABLE B & C: Unified Order and Payment Tracking
+model Order {
+  id              String    @id
+  storeId         String
+  store           Store     @relation(fields: [storeId], references: [id])
+  orderDate       DateTime
+  deliveryDate    DateTime?
+  orderAmount     Decimal   @db.Decimal(10, 2)
+  orderStatus     String    // 'Pending', 'Delivered', 'Cancelled'
+  counteringDate  DateTime? // From Collections Feed
+  paymentStatus   String    // 'Unpaid', 'Partially Paid', 'Fully Paid'
 }

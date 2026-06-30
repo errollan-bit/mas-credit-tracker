@@ -86,7 +86,7 @@ export const uploadOrderFeed = async (req: Request, res: Response): Promise<void
     });
 };
 
-// 3. COLLECTIONS FEED PIPE (NEW!)
+// 3. COLLECTIONS FEED PIPE
 export const uploadCollectionsFeed = async (req: Request, res: Response): Promise<void> => {
   if (!req.file) {
     res.status(400).json({ success: false, message: 'No file uploaded' });
@@ -105,7 +105,6 @@ export const uploadCollectionsFeed = async (req: Request, res: Response): Promis
 
           if (!orderId) continue;
 
-          // We use updateMany so it doesn't crash if the Order ID doesn't exist yet
           await prisma.order.updateMany({
             where: { id: orderId },
             data: {
@@ -121,4 +120,72 @@ export const uploadCollectionsFeed = async (req: Request, res: Response): Promis
         res.status(500).json({ success: false, message: 'Failed to process Collections Feed.' });
       }
     });
+};
+
+// 4. LIVE RISK LEDGER ANALYTICS (NEW ENGINE!)
+export const getCreditLedger = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Fetch everything dynamically structured through relationships
+    const groups = await prisma.group.findMany({
+      include: {
+        stores: {
+          include: {
+            orders: true
+          }
+        }
+      }
+    });
+
+    const report = groups.map((group) => {
+      let totalOutstanding = 0;
+      let hasOverdueInvoices = false;
+      const now = new Date();
+
+      // Look through every single order tied to every store in this group
+      group.stores.forEach((store) => {
+        store.orders.forEach((order) => {
+          if (order.paymentStatus !== 'Fully Paid') {
+            const amount = Number(order.orderAmount);
+            totalOutstanding += amount;
+
+            // Calculate exact aging configuration
+            const orderDate = new Date(order.orderDate);
+            const ageInMs = now.getTime() - orderDate.getTime();
+            const ageInDays = Math.floor(ageInMs / (1000 * 60 * 60 * 24));
+
+            // CRITICAL CHECK: Hard Block Rule for delinquency
+            if (ageInDays > group.paymentTerms) {
+              hasOverdueInvoices = true;
+            }
+          }
+        });
+      });
+
+      const approvedLimit = Number(group.approvedLimit);
+      const availableCredit = approvedLimit - totalOutstanding;
+
+      // Determine clean status rule based on calculation outputs
+      let status = 'Active';
+      if (hasOverdueInvoices) {
+        status = 'Blocked';
+      } else if (availableCredit <= approvedLimit * 0.1) {
+        status = 'Limit Review'; // Flags if available credit drops below 10%
+      }
+
+      return {
+        groupId: group.id,
+        groupName: group.name,
+        approvedLimit,
+        totalOutstanding,
+        availableCredit,
+        paymentTerms: group.paymentTerms,
+        status
+      };
+    });
+
+    res.json({ success: true, data: report });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Failed to compile real-time ledger report.' });
+  }
 };

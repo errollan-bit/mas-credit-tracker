@@ -9,6 +9,7 @@ interface LedgerItem {
   availableCredit: number;
   paymentTerms: number;
   status: string;
+  rawOrders?: any[]; // <--- Added this to catch the raw orders from the backend!
 }
 
 export default function App() {
@@ -20,7 +21,7 @@ export default function App() {
   // Fetch the live ledger metrics from the Backend engine (No more localhost!)
   const fetchLedger = async () => {
     try {
-      const response = await fetch('/api/reports/credit-ledger');
+      const response = await fetch('https://super-duper-enigma-96677gqv5wx4cp4xq-5000.app.github.dev/api/reports/credit-ledger');
       const resData = await response.json();
       if (resData.success) {
         setLedgerData(resData.data);
@@ -35,7 +36,7 @@ export default function App() {
   }, []);
 
   // Upload handler (No more localhost!)
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, endpoint: string) => {
+  const handleFileUpload = async (e: any, endpoint: string) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -45,7 +46,7 @@ export default function App() {
     formData.append('file', file);
 
     try {
-      const response = await fetch(`/api/uploads/${endpoint}`, {
+      const response = await fetch(`https://super-duper-enigma-96677gqv5wx4cp4xq-5000.app.github.dev/api/uploads/${endpoint}`, {
         method: 'POST',
         body: formData,
       });
@@ -60,6 +61,43 @@ export default function App() {
     } catch (err) {
       setUploadStatus('❌ Connection to API failed. Is the backend server running?');
     }
+  };
+
+  // Generates and downloads a CSV of unpaid orders for a specific group
+  const downloadGroupOrders = (group: LedgerItem) => {
+    if (!group.rawOrders || group.rawOrders.length === 0) {
+      alert(`No orders found for ${group.groupName}.`);
+      return;
+    }
+
+    // Filter out the safe ones, only show active hits against credit
+    const problemOrders = group.rawOrders.filter((order: any) => 
+        order.PaymentStatus !== 'Fully Paid' && order.OrderStatus !== 'Cancelled'
+    );
+
+    if (problemOrders.length === 0) {
+      alert(`Great news! ${group.groupName} has no unpaid orders blocking their credit.`);
+      return;
+    }
+
+    // Create CSV Headers
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "Store ID,Order ID,Amount,Order Status,Payment Status\n";
+
+    // Add the data rows
+    problemOrders.forEach((order: any) => {
+      const row = `${order.StoreId},${order.OrderId},${order.Amount},${order.OrderStatus},${order.PaymentStatus}`;
+      csvContent += row + "\n";
+    });
+
+    // Trigger the browser download
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `${group.groupId}_Problem_Orders.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const exportToCSV = () => {
@@ -194,6 +232,7 @@ export default function App() {
                     <th style={styles.th}>Available Credit</th>
                     <th style={styles.th}>Terms</th>
                     <th style={styles.th}>Risk Status</th>
+                    <th style={styles.th}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -202,10 +241,10 @@ export default function App() {
                       <td style={styles.td}>{item.groupId}</td>
                       <td style={styles.td}><strong>{item.groupName}</strong></td>
                       <td style={styles.td}>₱{item.approvedLimit.toLocaleString()}</td>
-                      <td style={styles.td} style={{...styles.td, color: item.totalOutstanding > 0 ? '#f43f5e' : '#cbd5e1'}}>
+                      <td style={{...styles.td, color: item.totalOutstanding > 0 ? '#f43f5e' : '#cbd5e1'}}>
                         ₱{item.totalOutstanding.toLocaleString()}
                       </td>
-                      <td style={styles.td} style={{...styles.td, color: item.availableCredit < 0 ? '#ef4444' : '#38bdf8'}}>
+                      <td style={{...styles.td, color: item.availableCredit < 0 ? '#ef4444' : '#38bdf8'}}>
                         ₱{item.availableCredit.toLocaleString()}
                       </td>
                       <td style={styles.td}>{item.paymentTerms} Days</td>
@@ -213,6 +252,11 @@ export default function App() {
                         <span style={{...styles.badge, ...getStatusBadgeStyle(item.status)}}>
                           {item.status}
                         </span>
+                      </td>
+                      <td style={styles.td}>
+                        <button onClick={() => downloadGroupOrders(item)} style={styles.actionBtn}>
+                          Export Orders
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -251,5 +295,6 @@ const styles = {
   th: { borderBottom: '2px solid #334155', padding: '0.75rem 1rem', color: '#94a3b8', fontWeight: 600 },
   tr: { borderBottom: '1px solid #334155', backgroundColor: '#1e293b' },
   td: { padding: '1rem', color: '#e2e8f0' },
-  badge: { padding: '0.25rem 0.625rem', borderRadius: '9999px', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase' as const }
+  badge: { padding: '0.25rem 0.625rem', borderRadius: '9999px', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase' as const },
+  actionBtn: { backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '0.4rem 0.75rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }
 };
